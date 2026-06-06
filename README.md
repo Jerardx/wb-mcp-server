@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/eduard256/wb-mcp-server/assets/img/wb-card.webp" alt="Wildberries MCP — search, details, reviews" width="100%">
+  <img src="https://raw.githubusercontent.com/eduard256/wb-mcp-server/assets/img/wb-card.webp" alt="Wildberries MCP — search, details, reviews" width="480">
 </p>
 
 # Wildberries MCP Server
