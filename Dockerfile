@@ -1,59 +1,21 @@
+# Wildberries MCP server — stdio. No browser; talks to WB's public JSON API via system curl
+# (curl passes WB's TLS fingerprint filter, Node's fetch gets 403).
 FROM node:20-slim
 
-# Install dependencies for Playwright
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    ca-certificates \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcairo2 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libglib2.0-0 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libpango-1.0-0 \
-    libx11-6 \
-    libxcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    xdg-utils \
-    xvfb \
-    && rm -rf /var/lib/apt/lists/*
+# curl is required by the client and is not in node:20-slim
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev 2>/dev/null || npm install --omit=dev
 
-# Install dependencies
-RUN npm install
+COPY src/ ./src/
 
-# Install Playwright browsers
-RUN npx playwright install chromium
-
-# Copy source code
-COPY src ./src
-
-# Expose port for HTTP server
-EXPOSE 3000
-
-# Set environment variables
 ENV NODE_ENV=production
-ENV PORT=3000
-ENV DISPLAY=:99
 
-# Start Xvfb and the HTTP server
-CMD Xvfb :99 -screen 0 1920x1080x24 & sleep 2 && node src/http-server.js
+# stdio transport: the MCP client spawns the container with -i. No port exposed.
+# Run with:  docker run -i --rm --init eduard256/wb-mcp-server:latest
+ENTRYPOINT ["node", "src/index.js"]
