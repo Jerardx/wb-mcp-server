@@ -1,3 +1,3 @@
 # wb-mcp-server
 
-<video src="https://github.com/eduard256/wb-mcp-server/releases/download/v0.0.1/wb-demo.mp4" controls muted autoplay loop width="100%"></video>
+<video src="https://github.com/user-attachments/assets/ca3a2b3c-278d-4206-8bf6-38476d2427d4" controls muted autoplay loop width="100%"></video>
