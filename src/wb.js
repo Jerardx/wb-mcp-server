@@ -5,7 +5,13 @@
 //   search   : https://search.wb.ru/exactmatch/ru/common/v5/search
 //   detail   : https://card.wb.ru/cards/v4/detail   (v2 is dead → 404; use v4)
 //   card.json: https://basket-XX.wbbasket.ru/volV/partP/{nm}/info/ru/card.json  (description + characteristics)
-//   reviews  : https://feedbacks1|2.wb.ru/feedbacks/v1/{root}   (root/imtId comes from the detail response)
+//   reviews  : the old feedbacks1|2.wb.ru/feedbacks/v1/{root} hosts are dead (TCP refused). WB now
+//              resolves the shard host first, then reads v2:
+//                1) https://feedback-bt.wildberries.ru/feedback/api/v2/host?imt={root}
+//                     → ["https://feedback-view-NN.wb.ru"]
+//                2) https://feedback-view-NN.wb.ru/feedbacks/v2/{root}
+//              Fallback when the resolver is unreachable: host = feedback-view-{01|02} chosen by
+//              crc16Arc(root) % 100 (>=50 → 02, else 01) — the same sharding the WB frontend uses.
 // WB rate-limits aggressive callers with HTTP 429 → retry with jitter.
 
 import { execFile } from "node:child_process";
@@ -127,14 +133,48 @@ export async function fetchCardJson(nm) {
   return getJson(cardJsonUrl(nm));
 }
 
-/** Reviews are sharded across feedbacks1/feedbacks2; one may return empty — try both. */
-export async function fetchFeedbacks(root) {
-  for (const host of ["feedbacks1", "feedbacks2"]) {
-    const data = await getJson(`https://${host}.wb.ru/feedbacks/v1/${root}`);
-    if (data && data.feedbackCount > 0) return data;
+// CRC16/ARC over the little-endian 8-byte imtId — WB's own shard selector for the feedback-view hosts.
+function crc16Arc(n) {
+  let v = Number(n), crc = 0;
+  const bytes = [];
+  for (let i = 0; i < 8; i++) { bytes.push(v % 256); v = Math.floor(v / 256); }
+  for (const b of bytes) {
+    crc ^= b;
+    for (let i = 0; i < 8; i++) crc = (crc & 1) ? (crc >>> 1) ^ 0xa001 : crc >>> 1;
   }
-  // fall back to whatever feedbacks1 returned (possibly empty), so callers see a consistent shape
-  return getJson(`https://feedbacks1.wb.ru/feedbacks/v1/${root}`);
+  return crc;
+}
+
+/**
+ * Reviews are sharded across feedback-view-NN.wb.ru. Ask WB's resolver which shard holds this
+ * imtId, then read /feedbacks/v2/{root} from it. If the resolver is unreachable, fall back to the
+ * crc16Arc shard the frontend itself computes, then to the other shard.
+ */
+export async function fetchFeedbacks(root) {
+  const candidates = [];
+
+  let resolved = null;
+  try {
+    resolved = await getJson(`https://feedback-bt.wildberries.ru/feedback/api/v2/host?imt=${root}`);
+  } catch { /* resolver down → use crc fallback below */ }
+  if (Array.isArray(resolved) && typeof resolved[0] === "string") {
+    candidates.push(resolved[0].replace(/\/+$/, ""));
+  }
+
+  const shard = crc16Arc(root) % 100 >= 50 ? "02" : "01";
+  for (const h of [`https://feedback-view-${shard}.wb.ru`, "https://feedback-view-01.wb.ru", "https://feedback-view-02.wb.ru"]) {
+    if (!candidates.includes(h)) candidates.push(h);
+  }
+
+  let last = null;
+  for (const base of candidates) {
+    try {
+      const data = await getJson(`${base}/feedbacks/v2/${root}`);
+      if (data && Array.isArray(data.feedbacks)) return data; // authoritative shard for this imtId
+      if (data) last = data;
+    } catch { /* try the next candidate host */ }
+  }
+  return last; // possibly null/empty → parseFeedbacks yields an empty review set
 }
 
 export { log };

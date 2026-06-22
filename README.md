@@ -1,62 +1,72 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/eduard256/wb-mcp-server/assets/img/wb-mcp-logo.webp" alt="WB MCP" width="420">
-</p>
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/eduard256/wb-mcp-server/assets/img/wb-card.webp" alt="Wildberries MCP — search, details, reviews" width="100%">
-</p>
-
 # Wildberries MCP Server
 
-MCP-сервер для поиска товаров на Wildberries (wildberries.ru). Даёт ИИ три инструмента: искать товары, читать карточку и читать отзывы.
+MCP-сервер для Wildberries (wildberries.ru). Даёт ИИ три инструмента: искать товары, читать карточку и читать отзывы. Браузер не нужен — сервер ходит в публичный JSON API Wildberries обычным HTTP и парсит готовый JSON.
 
-У Wildberries есть публичный JSON API, поэтому браузер не нужен — сервер ходит прямо в `search.wb.ru`, `card.wb.ru` и `feedbacks.wb.ru` обычным HTTP и парсит готовый JSON. Образ лёгкий, ответы быстрые.
+> Форк [eduard256/wb-mcp-server](https://github.com/eduard256/wb-mcp-server) с починенными отзывами.
+> WB перенёс API отзывов: старые хосты `feedbacks1/2.wb.ru` + путь `/feedbacks/v1/` мертвы (TCP-соединение
+> отбрасывается). Этот форк использует актуальную схему: резолвер шарда
+> `feedback-bt.wildberries.ru/feedback/api/v2/host` → `feedback-view-NN.wb.ru/feedbacks/v2/{imtId}`
+> (с CRC16/ARC-fallback по imtId, как в самом фронте WB). Прокси для WB не требуется.
 
 ## Инструменты
 
-1. **wb_search** — поиск товаров. Возвращает название, цену (в рублях, числом), старую цену, рейтинг, число отзывов, бренд, продавца, картинку и ссылку.
-2. **wb_product_details** — карточка товара по артикулу (nm) или ссылке. Цена, старая цена, наличие, рейтинг, продавец, цвета, фото, характеристики, описание.
+1. **wb_search** — поиск товаров. Название, цена (в рублях, числом), старая цена, рейтинг, число отзывов, бренд, продавец, картинка, ссылка.
+2. **wb_product_details** — карточка по артикулу (nm) или ссылке. Цена, наличие, рейтинг, продавец, цвета, фото, характеристики, описание.
 3. **wb_product_reviews** — отзывы покупателей: автор, оценка, текст, плюсы, минусы, дата, цвет/размер.
 
-## Запуск через Docker
+## Установка в Claude Code
 
-Образ опубликован в Docker Hub.
+Сервер запускается из исходников через `node` (в опубликованном Docker-образе upstream правок отзывов нет).
+
+### 1. Склонировать и установить зависимости
 
 ```bash
-docker run -i --rm --init eduard256/wb-mcp-server:latest
+git clone https://github.com/Jerardx/wb-mcp-server.git
+cd wb-mcp-server
+npm install
 ```
 
-Флаги: `-i` — stdin для stdio, `--init` — корректное завершение процесса. Chromium не нужен — образ на `node:20-slim` весит ~80 МБ.
+Нужен `curl` в системе (Node-fetch WB отбивает по TLS-фингерпринту, curl проходит) — на Windows/macOS/Linux он есть из коробки.
 
-## Установка в ваш клиент
+### 2. Добавить в Claude Code
 
-Инструкция под каждую систему — отдельным файлом:
+Через CLI (подставьте абсолютный путь до `src/index.js`):
 
-- [Claude Code](docs/CLAUDECODE-install.md)
-- [Claude Desktop](docs/CLAUDE-install.md)
-- [OpenAI Codex CLI](docs/CODEX-install.md)
-- [Cursor](docs/CURSOR-install.md)
-- [Windsurf](docs/WINDSURF-install.md)
-- [VS Code (Copilot)](docs/VSCODE-install.md)
-- [Cline](docs/CLINE-install.md)
-- [Continue.dev](docs/CONTINUE-install.md)
-- [Zed](docs/ZED-install.md)
-- [JetBrains AI Assistant](docs/JETBRAINS-install.md)
-- [Junie](docs/JUNIE-install.md)
-- [Gemini CLI](docs/GEMINI-install.md)
+```bash
+claude mcp add wb --scope user -- node /absolute/path/to/wb-mcp-server/src/index.js
+```
+
+Или вручную в `.mcp.json` в корне проекта:
+
+```json
+{
+  "mcpServers": {
+    "wb": {
+      "command": "node",
+      "args": ["/absolute/path/to/wb-mcp-server/src/index.js"]
+    }
+  }
+}
+```
+
+> Windows: путь в `args` пишите с двойными слэшами, например
+> `"D:\\Projects\\wb-mcp-server\\src\\index.js"`.
+
+### 3. Проверить
+
+```bash
+claude mcp list
+```
+
+Должны появиться три инструмента: `wb_search`, `wb_product_details`, `wb_product_reviews`.
 
 ## Как это работает
 
-- `src/wb.js` — HTTP-клиент к публичному API Wildberries. Запросы идут через системный `curl` (Node-fetch WB отбивает по TLS-фингерпринту, curl проходит). Троттлинг между запросами + ретрай с джиттером на 429/403.
+- `src/wb.js` — HTTP-клиент к публичному API WB через системный `curl`. Троттлинг между запросами + ретрай с джиттером на 429/403. Отзывы: резолв шард-хоста → `/feedbacks/v2/{imtId}`.
 - `src/parse.js` — чистые парсеры JSON (search / detail / card.json / feedbacks). Без сети.
-- `src/index.js` — MCP-сервер по stdio. Логи идут только в stderr (stdout занят протоколом JSON-RPC).
+- `src/index.js` — MCP-сервер по stdio. Логи только в stderr (stdout занят протоколом JSON-RPC).
 
-**Важно:**
-
-1. WB режет частые запросы (HTTP 429/403). Сервер сам выдерживает паузу и повторяет — но при шквале запросов ответы будут медленнее.
-2. Эндпоинт деталей — `card.wb.ru/cards/v4/detail` (v2 больше не работает).
-3. Описание и характеристики берутся из CDN `card.json` на шардах `basket-XX.wbbasket.ru`; номер шарда вычисляется по артикулу.
-4. Артикул (nm) для отзывов не подходит — отзывы лежат по `root` (imtId), который берётся из ответа деталей.
+**Важно:** WB режет частые запросы (429/403) — сервер сам делает паузу и повторяет. Артикул (nm) для отзывов не годится: отзывы лежат по `root` (imtId) из ответа деталей.
 
 ## Локальная разработка
 

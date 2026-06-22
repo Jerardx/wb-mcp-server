@@ -105,7 +105,7 @@ export function parseFeedbacks(json, limit = 10) {
     date: (f.createdDate || "").slice(0, 10) || null,
     color: f.color || null,
     size: f.size || null,
-    hasPhotos: Array.isArray(f.photos) && f.photos.length > 0,
+    hasPhotos: (Array.isArray(f.photos) && f.photos.length > 0) || (Array.isArray(f.photo) && f.photo.length > 0),
   }));
   return {
     rating: json?.valuation ?? null,
