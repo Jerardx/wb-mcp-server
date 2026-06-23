@@ -108,15 +108,51 @@ export function imageUrl(nm) {
 }
 
 // ── raw fetchers ─────────────────────────────────────────────────────────────────
+const SEARCH_HARD_CAP = 300; // safety ceiling; bump here if you want more
+const SEARCH_PER_PAGE = 100; // WB returns up to 100 products per page
+
+/**
+ * WB search supports &page=N (verified live: page 2 returns different products). One page holds
+ * up to 100 items, so to satisfy a larger `limit` we page until we have enough, deduping by nm.
+ * Returns a search-shaped object ({ products }) so parseSearch stays unchanged.
+ * Pages are throttled + retried inside getJson; if a later page 429s past its retries we keep
+ * whatever we already collected instead of failing the whole search.
+ */
 export async function fetchSearch(query, limit) {
-  const u = new URL("https://search.wb.ru/exactmatch/ru/common/v5/search");
-  u.searchParams.set("query", query);
-  u.searchParams.set("resultset", "catalog");
-  u.searchParams.set("limit", String(Math.min(Math.max(limit, 1), 100)));
-  u.searchParams.set("dest", DEST);
-  u.searchParams.set("curr", "rub");
-  u.searchParams.set("lang", "ru");
-  return getJson(u.toString());
+  const want = Math.min(Math.max(limit, 1), SEARCH_HARD_CAP);
+  const perPage = Math.min(SEARCH_PER_PAGE, want);
+  const maxPages = Math.ceil(want / SEARCH_PER_PAGE);
+  const seen = new Set();
+  const products = [];
+
+  for (let page = 1; products.length < want && page <= maxPages; page++) {
+    const u = new URL("https://search.wb.ru/exactmatch/ru/common/v5/search");
+    u.searchParams.set("query", query);
+    u.searchParams.set("resultset", "catalog");
+    u.searchParams.set("limit", String(perPage));
+    u.searchParams.set("dest", DEST);
+    u.searchParams.set("curr", "rub");
+    u.searchParams.set("lang", "ru");
+    if (page > 1) u.searchParams.set("page", String(page));
+
+    let json;
+    try {
+      json = await getJson(u.toString());
+    } catch (err) {
+      log(`search page ${page} failed (${err?.message}); returning ${products.length} collected`);
+      break;
+    }
+    const batch = json?.products || json?.data?.products || [];
+    if (!batch.length) break;
+    for (const p of batch) {
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        products.push(p);
+      }
+    }
+    if (batch.length < perPage) break; // last page reached
+  }
+  return { products };
 }
 
 export async function fetchDetail(nm) {

@@ -11,7 +11,7 @@ import { parseSearch, parseDetail, parseCardJson, parseFeedbacks } from "./parse
 
 const log = (...a) => console.error("[wb-mcp]", ...a);
 const TOOL_TIMEOUT_MS = 45000;
-const MAX_TEXT = 60000;
+const MAX_TEXT = 250000; // room for large paginated result sets (e.g. 300 search items)
 
 function withTimeout(promise, ms, label) {
   return Promise.race([
@@ -85,7 +85,13 @@ server.registerTool(
       "rating, review count, brand, seller, image and a product URL. Use it to find products and compare prices.",
     inputSchema: {
       query: z.string().min(1).describe('Search query, e.g. "macbook pro", "iphone 17 pro max", "носки мужские"'),
-      limit: z.number().int().min(1).max(100).default(12).describe("Max number of results (1–100, default 12)"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(300)
+        .default(12)
+        .describe("Max number of results (1–300, default 12). Above 100 the server pages WB search (slower; WB may rate-limit)."),
     },
     annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   },
